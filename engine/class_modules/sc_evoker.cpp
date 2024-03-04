@@ -63,6 +63,8 @@ struct evoker_td_t : public actor_target_data_t
     buff_t* shattering_star;
     buff_t* in_firestorm;
     buff_t* temporal_wound;
+    // TODO: TWW_CHECK
+    buff_t* melt_armor;
   } debuffs;
 
   struct buffs_t
@@ -595,6 +597,50 @@ struct evoker_t : public player_t
     bool remove_precombat_ancient_flame         = true;
   } option;
 
+  // TODO: TWW_REMOVELATER
+  struct warwithin_temp_t
+  {
+    bool mass_spender        = false;
+    int mass_spender_targets = 3;
+    double mass_spender_amp  = 0.25;
+
+    bool might_of_the_black_dragonflight          = false;
+    double might_of_the_black_dragonflight_amount = 0.1;
+
+    bool bombardments                = false;
+    double bombardments_chance       = 1;
+    double bombardments_rppm         = 30;
+    timespan_t bombardments_duration = 10_s;
+    timespan_t bombardments_icd      = 1_s;
+    double bombardments_damage       = 0.88;
+
+    bool onslaught = false;
+
+    bool melt_armor                = false;
+    double melt_armor_amp          = 0.2;
+    timespan_t melt_armor_duration = 12_s;
+
+    bool wingleader = false;
+    timespan_t wingleader_cdr = 1_s;
+    int wingleader_max_cdr = 3;
+
+    bool unrelenting_siege = false;
+    double unrelenting_siege_amp = 0.01;
+    int unrelenting_siege_max_stacks = 50;
+    timespan_t unrelenting_siege_time = 1_s;
+
+    bool extended_battle = false;
+    timespan_t extended_battle_extension = 1_s;
+
+    bool diverted_power = false;
+    double diverted_power_chance = 0.3;
+
+    bool maneuverability = false;
+    double maneuverability_tick_damage = 1;
+    timespan_t maneuverability_tick_time = 2_s;
+    timespan_t maneuverability_duration  = 12_s;
+  } tww_talents;
+
   // Action pointers
   struct actions_t
   {
@@ -647,6 +693,11 @@ struct evoker_t : public player_t
     // Augmentation
     propagate_const<buff_t*> reactive_hide;
     propagate_const<buff_t*> time_skip;
+
+    // Scalecommander
+    propagate_const<buff_t*> unrelenting_siege;
+    propagate_const<buff_t*> mass_spender;
+    propagate_const<buff_t*> mass_spender_disintegrate_ticks;
   } buff;
 
   // Specialization Spell Data
@@ -1952,6 +2003,11 @@ struct empowered_charge_t : public empowered_base_t<BASE>
       }
     }
 
+    if ( ab::p()->tww_talents.mass_spender )
+    {
+      ab::p()->buff.mass_spender->trigger();
+    }
+
     auto emp_state        = release_spell->get_state();
     emp_state->target     = release_target;
     release_spell->target = release_target;
@@ -2913,6 +2969,9 @@ struct azure_strike_t : public evoker_spell_t
 
     da *= 1.0 + p()->buff.iridescence_blue->check_value();
 
+    // TODO: TWW_REMOVELATER
+    da *= 1.0 + p()->buff.unrelenting_siege->check_stack_value();
+
     return da;
   }
 
@@ -2931,6 +2990,29 @@ struct azure_strike_t : public evoker_spell_t
 
 struct deep_breath_t : public evoker_spell_t
 {
+  // TODO: TWW_FIXLATER
+  struct maneuverability_dot_t : public evoker_spell_t
+  {
+    maneuverability_dot_t( evoker_t* p ) : evoker_spell_t( "maneuverability_dot", p, p->find_spell( 353759 ) )
+    {
+      aoe = -1;
+
+      spell_power_mod.tick = p->tww_talents.maneuverability_tick_damage;
+      base_tick_time       = p->tww_talents.maneuverability_tick_time;
+      dot_duration         = p->tww_talents.maneuverability_duration;
+    }
+
+    void impact( action_state_t* s ) override
+    {
+      evoker_spell_t::impact( s );
+    }
+
+    void execute() override
+    {
+      evoker_spell_t::execute();
+    }
+  };
+
   struct deep_breath_dot_t : public evoker_spell_t
   {
     deep_breath_dot_t( evoker_t* p ) : evoker_spell_t( "deep_breath_dot", p, p->find_spell( 353759 ) )
@@ -2946,6 +3028,10 @@ struct deep_breath_t : public evoker_spell_t
     void impact( action_state_t* s ) override
     {
       evoker_spell_t::impact( s );
+
+      // TODO: TWW_CHECKLATER
+      if ( p()->tww_talents.melt_armor )
+        p()->get_target_data( s->target )->debuffs.melt_armor->trigger();
     }
 
     void execute() override
@@ -2956,10 +3042,12 @@ struct deep_breath_t : public evoker_spell_t
       {
         p()->buff.imminent_destruction->trigger();
       }
+
     }
   };
 
   action_t* damage;
+  action_t* damage_maneuverability;
   action_t* ebon;
 
   deep_breath_t( evoker_t* p, std::string_view options_str )
@@ -2967,10 +3055,17 @@ struct deep_breath_t : public evoker_spell_t
                       p->talent.breath_of_eons.ok() ? spell_data_t::not_found() : p->find_class_spell( "Deep Breath" ),
                       options_str ),
       damage( nullptr ),
-      ebon( nullptr )
+      ebon( nullptr ),
+      damage_maneuverability( nullptr )
   {
     damage        = p->get_secondary_action<deep_breath_dot_t>( "deep_breath_dot" );
     damage->stats = stats;
+
+    if ( p->tww_talents.maneuverability )
+    {
+      damage_maneuverability = p->get_secondary_action<maneuverability_dot_t>( "maneuverability_dot" );
+      add_child( damage_maneuverability );
+    }
 
     travel_delay = 0.9;   // guesstimate, TODO: confirm
     travel_speed = 19.5;  // guesstimate, TODO: confirm
@@ -2988,7 +3083,12 @@ struct deep_breath_t : public evoker_spell_t
     evoker_spell_t::impact( s );
 
     if ( s->chain_target == 0 )
+    {
       damage->execute_on_target( s->target );
+      // TODO: TWW_FIXLATER
+      if ( damage_maneuverability )
+        damage_maneuverability->execute_on_target( s->target );
+    }
   }
 
   void execute() override
@@ -3060,6 +3160,13 @@ struct disintegrate_t : public essence_spell_t
     if ( p()->buff.iridescence_blue->check() )
       p()->buff.iridescence_blue_disintegrate->trigger( num_ticks, buff_duration );
 
+    // TODO: TWW_FIXLATER
+    if ( p()->buff.mass_spender->check() )
+    {
+      p()->buff.mass_spender_disintegrate_ticks->trigger( num_ticks, p()->tww_talents.mass_spender_amp * 2, -1, buff_duration );
+      p()->buff.mass_spender->decrement();
+    }
+
     essence_spell_t::execute();
   }
 
@@ -3071,6 +3178,12 @@ struct disintegrate_t : public essence_spell_t
       ta *= 1.0 + titanic_mul;
 
     ta *= 1.0 + p()->buff.iridescence_blue_disintegrate->check_value();
+    
+    // TODO: TWW_REMOVELATER
+    ta *= 1.0 + p()->get_target_data( s->target )->debuffs.melt_armor->check_value();
+
+    // TODO: TWW_REMOVELATER
+    ta *= 1.0 + p()->buff.mass_spender_disintegrate_ticks->check_value();
 
     return ta;
   }
@@ -3081,6 +3194,7 @@ struct disintegrate_t : public essence_spell_t
 
     p()->buff.essence_burst_titanic_wrath_disintegrate->decrement();
     p()->buff.iridescence_blue_disintegrate->decrement();
+    p()->buff.mass_spender_disintegrate_ticks->decrement();
 
     if ( p()->talent.scintillation.ok() && rng().roll( p()->talent.scintillation->effectN( 2 ).percent() ) )
     {
@@ -3291,6 +3405,9 @@ struct living_flame_t : public evoker_spell_t
 
       da *= 1.0 + p()->buff.iridescence_red->check_value();
 
+      // TODO: TWW_REMOVELATER
+      da *= 1.0 + p()->buff.unrelenting_siege->check_stack_value();
+
       return da;
     }
   };
@@ -3440,7 +3557,7 @@ struct living_flame_t : public evoker_spell_t
       }
     }
 
-    if ( p()->buff.burnout->up() )
+    if ( p()->buff.burnout->up() && !is_precombat )
       p()->buff.burnout->decrement();
 
     // Reset them after execute
@@ -3620,6 +3737,9 @@ struct pyre_t : public essence_spell_t
       da *= 1.0 + s_->charged_blast;
       da *= 1.0 + s_->essence_burst;
       da *= 1.0 + s_->iridescence;
+
+      // TODO: TWW_REMOVELATER
+      da *= 1.0 + p()->get_target_data( s->target )->debuffs.melt_armor->check_value();
 
       return da;
     }
@@ -4648,6 +4768,11 @@ evoker_td_t::evoker_td_t( player_t* target, evoker_t* evoker )
                                 ->set_cooldown( 0_ms )
                                 ->apply_affecting_aura( evoker->talent.focusing_iris );
 
+  debuffs.melt_armor = make_buff( *this, "melt_armor" )
+                           ->set_cooldown( 0_ms )
+                           ->set_duration( evoker->tww_talents.melt_armor_duration )
+                           ->set_default_value( evoker->tww_talents.melt_armor_amp );
+
   debuffs.in_firestorm = make_buff( *this, "in_firestorm" )->set_max_stack( 20 )->set_duration( timespan_t::zero() );
 
   if ( evoker->naszuro && !target->is_enemy() && !target->is_pet() )
@@ -5260,6 +5385,37 @@ void evoker_t::init_finished()
       } );
     } );
   }
+
+
+  // TODO: TWW_FIXLATER
+
+  if ( tww_talents.onslaught )
+  {
+    register_on_combat_state_callback( [ this ]( player_t*, bool in_combat ) {
+      if ( in_combat )
+      {
+        buff.burnout->increment();
+      }
+    } );
+  }
+
+  if ( tww_talents.unrelenting_siege )
+  {
+    register_on_combat_state_callback( [ this ]( player_t*, bool in_combat ) {
+      if ( in_combat )
+      {
+        buff.unrelenting_siege->set_reverse( false );
+        if ( !buff.unrelenting_siege->check() )
+        {
+          buff.unrelenting_siege->trigger();
+        }
+      }
+      else
+      {
+        buff.unrelenting_siege->set_reverse( true );
+      }
+    } );
+  }
 }
 
 role_e evoker_t::primary_role() const
@@ -5762,6 +5918,25 @@ void evoker_t::create_buffs()
   buff.momentum_shift = make_buff<e_buff_t>( this, "momentum_shift", find_spell( 408005 ) )
                             ->set_default_value_from_effect( 1 )
                             ->set_pct_buff_type( STAT_PCT_BUFF_INTELLECT );
+
+  // Scalecommander
+
+  buff.unrelenting_siege = make_buff( this, "unrelenting_siege" )
+                               ->set_default_value( tww_talents.unrelenting_siege_amp )
+                               ->set_max_stack( tww_talents.unrelenting_siege_max_stacks )
+                               ->set_period( tww_talents.unrelenting_siege_time )
+                               ->set_constant_behavior( buff_constant_behavior::NEVER_CONSTANT );
+
+  
+  buff.mass_spender = make_buff( this, "mass_spender" )
+                               ->set_max_stack( 2 )
+                               ->set_constant_behavior( buff_constant_behavior::NEVER_CONSTANT );
+
+  
+  buff.mass_spender_disintegrate_ticks = make_buff( this, "mass_spender_disintegrate_ticks" )
+                          ->set_default_value( 0.5 )
+                          ->set_max_stack( 8 )
+                          ->set_constant_behavior( buff_constant_behavior::NEVER_CONSTANT );
 }
 
 void evoker_t::create_options()
@@ -5780,6 +5955,18 @@ void evoker_t::create_options()
   add_option( opt_string( "evoker.force_clutchmates", option.force_clutchmates ) );
   add_option( opt_bool( "evoker.make_simplified_if_alone", option.make_simplified_if_alone ) );
   add_option( opt_bool( "evoker.remove_precombat_ancient_flame", option.remove_precombat_ancient_flame ) );
+
+  add_option( opt_bool( "evoker.tww.onslaught", tww_talents.onslaught ) );
+  add_option( opt_bool( "evoker.tww.unrelenting_siege", tww_talents.unrelenting_siege ) );
+
+  add_option( opt_bool( "evoker.tww.maneuverability", tww_talents.maneuverability ) );
+  add_option( opt_float( "evoker.tww.maneuverability_tick_damage", tww_talents.maneuverability_tick_damage, 0.0,
+                         std::numeric_limits<double>::max() ) );
+
+  add_option( opt_bool( "evoker.tww.melt_armor", tww_talents.melt_armor ) );
+
+  add_option( opt_bool( "evoker.tww.mass_spender", tww_talents.mass_spender ) );
+  
 }
 
 void evoker_t::analyze( sim_t& sim )
@@ -5860,6 +6047,9 @@ void evoker_t::copy_from( player_t* source )
   player_t::copy_from( source );
 
   option = debug_cast<evoker_t*>( source )->option;
+  
+  // TODO: TWW_REMOVELATER
+  tww_talents = debug_cast<evoker_t*>( source )->tww_talents;
 }
 
 void evoker_t::merge( player_t& other )
