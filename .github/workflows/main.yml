@@ -37,9 +37,9 @@ jobs:
             cppVersion: 20
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         env: { ccache-prefix: 'ubuntu-${{ matrix.compiler }}-cpp-${{ matrix.cppVersion }}-ccache-${{ env.ccache-generation }}' }
         with:
           path: ${{ runner.workspace }}/.ccache
@@ -68,7 +68,7 @@ jobs:
           ninja -C '${{ runner.workspace }}/b/ninja'
           ccache -s
           
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: |
             ${{ runner.workspace }}/b/ninja/simc
@@ -98,9 +98,9 @@ jobs:
             cppVersion: 20
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         env: { ccache-prefix: 'ubuntu-${{ matrix.compiler }}-cpp-${{ matrix.cppVersion }}-ccache-${{ env.ccache-generation }}' }
         with:
           path: ${{ runner.workspace }}/.ccache
@@ -135,7 +135,7 @@ jobs:
           ninja -C '${{ runner.workspace }}/b/ninja'
           ccache -s
 
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: |
             ${{ runner.workspace }}/b/ninja/simc
@@ -180,7 +180,7 @@ jobs:
             cppVersion: 20
 
     steps:
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: |
             ${{ runner.workspace }}/b/ninja/simc
@@ -205,7 +205,7 @@ jobs:
       matrix:
         cppVersion: [17]
         tier: [ Tier30, Tier31 ]
-        compiler: [clang++-15]
+        compiler: [gcc-12]
         spec: [
             Death_Knight_Blood, Death_Knight_Frost, Death_Knight_Unholy,
             Demon_Hunter_Havoc, Demon_Hunter_Vengeance,
@@ -222,11 +222,11 @@ jobs:
             Warrior_Arms, Warrior_Fury, Warrior_Protection,
           ]
         include:
-          - compiler: clang++-15
+          - compiler: gcc-12
             os: ubuntu-22.04
 
     steps:
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: |
             ${{ runner.workspace }}/b/ninja/simc
@@ -258,13 +258,13 @@ jobs:
       fail-fast: false
       matrix:
         cppVersion: [17]
-        compiler: [clang++-15]        
+        compiler: [gcc-12]
         include:
-          - compiler: clang++-15
+          - compiler: gcc-12
             os: ubuntu-22.04
     
     steps:
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: |
             ${{ runner.workspace }}/b/ninja/simc
@@ -298,7 +298,7 @@ jobs:
     name: macos-latest
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Build
         run: make SANITIZE=1 -C engine debug -j 2
@@ -321,7 +321,7 @@ jobs:
        CMAKE_BUILD_DIR: ${{ github.workspace }}/builddir/
        
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
        # Setup the build machine with the most recent versions of CMake and Ninja. Both are cached if not already: on subsequent runs both will be quickly restored from GitHub cache service.
       - uses: lukka/get-cmake@latest

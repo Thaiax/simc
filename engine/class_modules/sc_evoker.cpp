@@ -906,7 +906,6 @@ struct evoker_t : public player_t
   // Gains
   struct gains_t
   {
-    propagate_const<gain_t*> eye_of_infinity;
     propagate_const<gain_t*> roar_of_exhilaration;
     propagate_const<gain_t*> energizing_flame;
   } gain;
@@ -919,6 +918,8 @@ struct evoker_t : public player_t
     propagate_const<proc_t*> emerald_trance;
     propagate_const<proc_t*> anachronism_essence_burst;
     propagate_const<proc_t*> echoing_strike;
+    propagate_const<proc_t*> overwritten_leaping_flames;
+    
   } proc;
 
   // RPPMs
@@ -2411,8 +2412,6 @@ protected:
   using state_t = evoker_action_state_t<sands_of_time_state_t>;
 
 public:
-  double base_ebon_value        = 0.0;
-  double clutchmates_ebon_value = 0.0;
   timespan_t ebon_time          = timespan_t::min();
   mutable std::vector<player_t*> secondary_list, tertiary_list;
 
@@ -2438,12 +2437,7 @@ public:
     cooldown->base_duration = 0_s;
 
     parse_effect_modifiers( p->sets->set( EVOKER_AUGMENTATION, T30, B4 ) );
-
-    base_ebon_value = modified_effect( 1 ).percent();
-
-    parse_effect_modifiers( p->spec.close_as_clutchmates );
-
-    clutchmates_ebon_value = modified_effect( 1 ).percent();
+    parse_effect_modifiers( p->spec.close_as_clutchmates, [ p = p ] { return p->close_as_clutchmates; } );
   }
 
   action_state_t* new_state() override
@@ -2458,7 +2452,7 @@ public:
 
   double ebon_value() const
   {
-    return p()->close_as_clutchmates ? clutchmates_ebon_value : base_ebon_value;
+    return modified_effectN_percent( 1 );
   }
 
   const state_t* cast_state( const action_state_t* s ) const
@@ -2809,7 +2803,16 @@ struct fire_breath_t : public empowered_charge_spell_t
     {
       base_t::execute();
 
-      p()->buff.leaping_flames->trigger( empower_value( execute_state ) );
+      if ( p()->talent.leaping_flames.ok() )
+      {
+        if ( p()->buff.leaping_flames->check() )
+        {
+          p()->proc.overwritten_leaping_flames->occur();
+          p()->buff.leaping_flames->expire();
+        }
+
+        p()->buff.leaping_flames->trigger( empower_value( execute_state ) );
+      }
 
       if ( p()->talent.infernos_blessing.ok() )
       {
@@ -2844,18 +2847,6 @@ struct fire_breath_t : public empowered_charge_spell_t
       m *= std::sqrt( reduced_aoe_targets / n );
 
       return base_t::calculate_tick_amount( s, m );
-    }
-
-    double composite_da_multiplier( const action_state_t* s ) const override
-    {
-      auto m = base_t::composite_da_multiplier( s );
-
-      if ( p()->talent.eye_of_infinity.enabled() )
-      {
-        m *= 1 + p()->talent.eye_of_infinity->effectN( 1 ).percent();
-      }
-
-      return m;
     }
 
     void tick( dot_t* d ) override
@@ -2900,11 +2891,9 @@ struct eternity_surge_t : public empowered_charge_spell_t
 {
   struct eternity_surge_damage_t : public empowered_release_spell_t
   {
-    double eoi_ess;  // essence gain on crit from Eye of Infinity
 
     eternity_surge_damage_t( evoker_t* p, std::string_view name )
-      : base_t( name, p, p->find_spell( 359077 ) ),
-        eoi_ess( p->talent.eye_of_infinity->effectN( 1 ).trigger()->effectN( 1 ).resource( RESOURCE_ESSENCE ) )
+      : base_t( name, p, p->find_spell( 359077 ) )
     {
     }
 
@@ -2925,13 +2914,22 @@ struct eternity_surge_t : public empowered_charge_spell_t
 
       return n == 1 ? 0 : n;
     }
+        
+    double composite_da_multiplier( const action_state_t* s ) const override
+    {
+      auto m = base_t::composite_da_multiplier( s );
+
+      if ( p()->talent.eye_of_infinity.enabled() && s->chain_target == 0 )
+      {
+        m *= 1 + p()->talent.eye_of_infinity->effectN( 1 ).percent();
+      }
+
+      return m;
+    }
 
     void impact( action_state_t* s ) override
     {
       base_t::impact( s );
-
-      if ( eoi_ess && s->result == RESULT_CRIT )
-        p()->resource_gain( RESOURCE_ESSENCE, eoi_ess, p()->gain.eye_of_infinity );
     }
   };
 
@@ -4880,8 +4878,7 @@ evoker_td_t::evoker_td_t( player_t* target, evoker_t* evoker )
               evoker->allies_with_my_ebon.find_and_erase_unordered( target );
               if ( auto e = dynamic_cast<evoker_t*>( target ) )
               {
-                auto vec = e->allied_ebons_on_me;
-                vec.erase( std::remove( vec.begin(), vec.end(), b ), vec.end() );
+                range::erase_remove( e->allied_ebons_on_me, b );
               }
             }
             for ( auto& c : evoker->allied_ebon_callbacks )
@@ -5451,7 +5448,6 @@ void evoker_t::init_gains()
 {
   player_t::init_gains();
 
-  gain.eye_of_infinity      = get_gain( "Eye of Infinity" );
   gain.roar_of_exhilaration = get_gain( "Roar of Exhilaration" );
   gain.energizing_flame = get_gain( "Energizing Flame" );
 }
@@ -5460,11 +5456,12 @@ void evoker_t::init_procs()
 {
   player_t::init_procs();
 
-  proc.ruby_essence_burst        = get_proc( "Ruby Essence Burst" );
-  proc.azure_essence_burst       = get_proc( "Azure Essence Burst" );
-  proc.emerald_trance            = get_proc( "Emerald Trance" );
-  proc.anachronism_essence_burst = get_proc( "Anachronism" );
-  proc.echoing_strike            = get_proc( "Echoing Strike" );
+  proc.ruby_essence_burst         = get_proc( "Ruby Essence Burst" );
+  proc.azure_essence_burst        = get_proc( "Azure Essence Burst" );
+  proc.emerald_trance             = get_proc( "Emerald Trance" );
+  proc.anachronism_essence_burst  = get_proc( "Anachronism" );
+  proc.echoing_strike             = get_proc( "Echoing Strike" );
+  proc.overwritten_leaping_flames = get_proc( "Overwritten Leaping Flames" );
 }
 
 void evoker_t::init_base_stats()
@@ -6138,7 +6135,6 @@ void evoker_t::apply_affecting_auras_late( action_t& action )
   action.apply_affecting_aura( talent.lay_waste );
   action.apply_affecting_aura( talent.onyx_legacy );
   action.apply_affecting_aura( talent.spellweavers_dominance );
-  action.apply_affecting_aura( talent.eye_of_infinity );
   action.apply_affecting_aura( talent.event_horizon );
   action.apply_affecting_aura( sets->set( EVOKER_DEVASTATION, T29, B2 ) );
   action.apply_affecting_aura( sets->set( EVOKER_DEVASTATION, T30, B4 ) );

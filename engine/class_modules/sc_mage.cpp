@@ -3533,6 +3533,20 @@ struct conflagration_t final : public fire_mage_spell_t
   {
     background = true;
   }
+
+  double composite_rolling_ta_multiplier( const action_state_t* s ) const override
+  {
+    // When refreshing Conflagration, there is a bug where the duration must change to roll in the new damage.
+    dot_t* dot = find_dot( s->target );
+    if ( p()->bugs && dot )
+    {
+      timespan_t refresh_duration = calculate_dot_refresh_duration( dot, composite_dot_duration( s ) );
+      if ( refresh_duration == dot->remains() )
+        return s->rolling_ta_multiplier;
+    }
+
+    return fire_mage_spell_t::composite_rolling_ta_multiplier( s );
+  }
 };
 
 struct conflagration_flare_up_t final : public fire_mage_spell_t
@@ -3942,7 +3956,7 @@ struct shattered_ice_t final : public spell_t
   {
     spell_t::available_targets( tl );
 
-    tl.erase( std::remove( tl.begin(), tl.end(), target ), tl.end() );
+    range::erase_remove( tl, target );
 
     return tl.size();
   }
@@ -4318,7 +4332,7 @@ struct glacial_blast_t final : public spell_t
   {
     spell_t::available_targets( tl );
 
-    tl.erase( std::remove( tl.begin(), tl.end(), target ), tl.end() );
+    range::erase_remove( tl, target );
 
     return tl.size();
   }
@@ -5253,7 +5267,7 @@ struct splintering_ray_t final : public spell_t
   {
     spell_t::available_targets( tl );
 
-    tl.erase( std::remove( tl.begin(), tl.end(), target ), tl.end() );
+    range::erase_remove( tl, target );
 
     return tl.size();
   }

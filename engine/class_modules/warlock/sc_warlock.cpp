@@ -438,7 +438,11 @@ struct seed_of_corruption_t : public warlock_spell_t
     }
 
     if ( valid_target )
-      tl.erase( std::remove_if( tl.begin(), tl.end(), [ this ]( player_t* target ){ return ( p()->get_target_data( target )->dots_seed_of_corruption->is_ticking() || has_travel_events_for( target ) ); } ), tl.end() );
+    {
+      range::erase_remove( tl, [ this ]( player_t* t ) {
+        return ( td( t )->dots_seed_of_corruption->is_ticking() || has_travel_events_for( t ) );
+      } );
+    }
 
     return tl.size();
   }
@@ -813,6 +817,22 @@ struct fel_barrage_t : public warlock_spell_t
   fel_barrage_t( warlock_t* p ) : warlock_spell_t( "Fel Barrage", p, p->talents.fel_barrage )
   {
     background = dual = true;
+  }
+
+  // Copied from destruction_spell_t as this needs to be a warlock_spell_t, prefer to look at unifying this in the future
+  double action_multiplier () const override 
+  {
+    double pm = warlock_spell_t::action_multiplier();
+
+    if ( p ()->warlock_base.chaotic_energies->ok () ) 
+    {
+      double destro_mastery_value = p ()->cache.mastery_value () / 2.0;
+      double chaotic_energies_rng = rng ().range (0, destro_mastery_value);
+
+      pm *= 1.0 + chaotic_energies_rng + (destro_mastery_value);
+    }
+
+    return pm;
   }
 };
 
