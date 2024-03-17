@@ -680,7 +680,7 @@ struct evoker_t : public player_t
       struct
       {
         bool enabled      = false;
-        double modifier   = 0.7;
+        double modifier   = -0.3;
         size_t max_stacks = 2;
       } burning_adrenaline;
 
@@ -1634,7 +1634,13 @@ public:
   timespan_t execute_time() const override
   {
     timespan_t t = ab::execute_time();
-    return std::max( 0_ms, t * ( 1 - p()->buff.burning_adrenaline->check_value() ) );
+    return std::max( 0_ms, t * ( 1 + p()->buff.burning_adrenaline->check_value() ) );
+  }
+
+  timespan_t gcd() const override
+  {
+    timespan_t t = ab::gcd();
+    return std::max( ab::min_gcd, t * ( 1 + p()->buff.burning_adrenaline->check_value() ) );
   }
 };
 
